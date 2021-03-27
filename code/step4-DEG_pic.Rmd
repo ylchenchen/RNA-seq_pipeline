@@ -1,0 +1,62 @@
+---
+title: "step4-DEG_pic"
+author: 'ylChen'
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    self_contained: true
+---
+
+## 1. 加载数据
+
+```{r}
+rm(list = ls())
+options(stringsAsFactors = F)
+load('../data/DEG_DESeq2.rdata')
+```
+
+## 2. 上下调
+
+ * 注意是logFC 还是 FC
+ 
+```{r,collapse=TRUE}
+# 筛选上下调，设定阈值
+fc_cutoff <- 1.5
+fdr <- 0.05
+
+DEG_DESeq2$regulated <- "normal"
+
+loc_up <- intersect(which(DEG_DESeq2$log2FoldChange>log2(fc_cutoff)),which(DEG_DESeq2$padj<fdr))
+loc_down <- intersect(which(DEG_DESeq2$log2FoldChange< (-log2(fc_cutoff))),which(DEG_DESeq2$padj<fdr))
+
+DEG_DESeq2$regulated[loc_up] <- "up"
+DEG_DESeq2$regulated[loc_down] <- "down"
+
+table(DEG_DESeq2$regulated)
+```
+## 3. volcano
+
+```{r,collapse=TRUE}
+
+volcano=function(DEG_DESeq2,logFC_cutoff){
+  this_tile <- paste0('Cutoff for logFC is ',round(logFC_cutoff,3),
+                    '\nThe number of up gene is ',nrow(DEG_DESeq2[DEG_DESeq2$regulated =='up',]) ,
+                    '\nThe number of down gene is ',nrow(DEG_DESeq2[DEG_DESeq2$regulated =='down',]))
+
+library(ggplot2)
+g <- ggplot(data=DEG_DESeq2, 
+            aes(x=log2FoldChange, y=-log10(padj), 
+                color=regulated)) +
+  geom_point(alpha=0.4, size=1) +
+  theme_set(theme_set(theme_bw(base_size=10)))+
+  xlab("log2 fold change") + ylab("-log10 padj") +
+  ggtitle( this_tile ) + theme(plot.title = element_text(size=10,hjust = 0.5))+
+  scale_colour_manual(values = c('blue','black','red'))
+g}
+#ggsave(g,filename = '../pic/volcano.png')}
+
+volcano(DEG_DESeq2 = DEG_DESeq2,logFC_cutoff= 1.5)
+#这个数据集特殊，没有下调基因
+```
+
+

@@ -1,0 +1,50 @@
+---
+title: "step02_check"
+author: 'ylChen'
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    self_contained: true
+---
+
+## 0. 加载数据
+
+```{r}
+load('../data/input_DEG.rdata')
+exprSet <- express_cpm
+exprSet[1:3,1:3]
+```
+## 1. boxplot
+
+```{r,collapse=TRUE}
+# 样本表达总体分布-箱式图
+library(ggplot2)
+# 构造绘图数据
+# 主要是构建dataframe，一列样本，一列表达量
+data <- data.frame(expression=c(exprSet),sample=rep(colnames(exprSet),each=nrow(exprSet)))
+head(data)
+
+p <- ggplot(data = data,aes(x=sample,y=expression,fill=sample))
+p1 <- p + geom_boxplot() + theme(axis.text.x = element_text(angle = 90)) + xlab(NULL) + ylab("log2(CPM+1)")
+p1
+```
+
+## 2. violinplot
+
+```{r}
+# 样本表达总体分布-小提琴图
+p2 <- p + geom_violin() + theme(axis.text = element_text(size = 12),axis.text.x = element_text(angle = 90)) + xlab(NULL) + ylab("log2(CPM+1)")
+p2
+```
+
+## 3. density plot
+
+```{r}
+# 样本表达总体分布-概率密度分布图
+m <- ggplot(data=data, aes(x=expression))
+p3 <- m +  geom_density(aes(fill=sample, colour=sample),alpha = 0.2) + xlab("log2(CPM+1)")
+p3
+```
+
+
+
