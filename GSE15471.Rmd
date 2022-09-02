@@ -1,0 +1,254 @@
+---
+title: 'GSE15471'
+author: "lj"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    self_contained: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = F,message = F,collapse=TRUE)
+```
+
+### 一、数据集介绍
+
+-   GEO链接： <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE16515>
+
+-   芯片平台： GPL570 [HG-U133_Plus_2] Affymetrix Human Genome U133 Plus 2.0 Array
+
+-   平台链接： <https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GPL570>
+
+-   样品信息： 16个正常样本与36个胰腺导管腺癌（PDAC）样本
+
+-   文章链接：FKBP51 Affects Cancer Cell Response to Chemotherapy by Negatively Regulating
+
+Akt.Cancer Cell. 2009 Sep 8; 16(3) <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2755578/>
+
+### 二、核心步骤
+
+#### 1.运行准备与获取输入数据及输入数据检查
+
+##### 01步R包加载、加载数据处理脚本与加载绘图脚本
+
+```{r}
+# 清空环境，加载R包与脚本----
+rm(list = ls())
+source("scripts/step0-load-packages.R") #加载R包
+source("scripts/functions.R") #加载数据处理脚本
+source('scripts/draw-figures.R')#加载绘图脚本
+```
+
+##### 02步获取输入数据
+
+-   主要获得三方面输入数据：（表达矩阵、临床信息与芯片注释包）
+
+```{r}
+# 获取表达矩阵、临床信息与芯片注释包----
+getOption('timeout')
+options(timeout=10000)
+gse_number = "GSE15471"#需要指定gse_number 
+f="step1-data.Rdata"
+source("scripts/step1-download-data.R") #下载三方面输入数据
+```
+
+
+##### 03步输入数据检查（两方面）
+
+-   主要检查两方面：1.检查exp列名与pd的行名顺序是否完全一致 2.检查是否需要取log（箱线图）
+
+```{r}
+# 数据两方面检查----
+
+## 01-检查1：exp列名与pd的行名顺序是否完全一致
+p = identical(rownames(pd),colnames(probeM));p
+if(!p) probeM = probeM[,match(rownames(pd),colnames(probeM))]
+
+## 02-检查2：是否需要取log
+probeM[1:4,1:4]#检测整体探针是否需要取log，小于20则不需要取
+#probeM =log2(probeM+1) #不取log则不要运行此步，不运行可以加个注释
+
+## 03-开始绘图
+ 
+draw_p1_boxplot(probeM)#箱线图初看组内与组间测序差异 p1
+
+```
+
+#### 2.整理数据
+
+整理两方面：1.整理获得去除冗余探针的表达矩阵 2.整理获得分组信息
+
+##### 04步整理探针矩阵获取基因表达矩阵，去除冗余探针
+
+```{r}
+# 整理探针矩阵获取基因表达矩阵，去除冗余探针----
+
+## 01将探针表达矩阵转换为基因表达矩阵，探针ID与基因symbol一一对应
+geneM = probeM2geneM(ids,probeM)
+
+## 02检查转换情况，看两个管家基因表达范围（正常10-15之间）
+fivenum(geneM['ACTB',])
+fivenum(geneM['GAPDH',])
+```
+
+##### 05步整理获得分组信息(根据生物学背景及研究目的人为分组)
+
+```{r}
+# 获取样品分组信息并进行分组----
+
+## 01查找分组信息所在列，通过使用ifelse与str_detect进行分组
+pd$source_name_ch1 #找列，看有无分组信息
+Group=ifelse(str_detect(pd$characteristics_ch1.1,"normal"),"Normal","PDAC") #进行分组
+
+## 02将Group转换成因子，指定levels；对照组在前，处理组在后
+Group = factor(Group,levels = c("Normal","PDAC"))
+table(Group)
+##分组中，文章用了19例对照36例PDAC，而数据上传只有16例对照
+
+## 03保存基因表达矩阵与样品分组信息
+save(geneM,Group,file = "step2-genemGro.Rdata")
+
+```
+
+#### 3. 3个质控图及其拼图(样本PCA图、高变基因热图与样品相关性图)
+
+3个图的作用：从样本间的差异与样本内的差异来看测序效果与分组是否有差异
+
+```{r}
+
+# 绘制三个质控图----
+
+## 01PCA看组内与组间整体差异  p2
+p2=draw_p2_PCA(probeM,gse_number,Group)
+
+## 02高变基因热图（画sd排名前1000基因的热图）p3
+p3=draw_p3_pheatmap(geneM,Group,gse_number)
+
+## 03样品相关性热图 p4
+p4=draw_p4_colsample(Group,exp,gse_number)
+
+## 04拼图与保存
+##注热图得转换为ggplot格式才能进行拼图
+p2+as.ggplot(p3)+ as.ggplot(p4)  
+ggsave("png/p234.pdf",width = 12,height = 5)
+
+```
+
+#### 4.差异基因-limma分析（火山图与热图，两图）
+
+```{r}
+# 差异分析与绘制火山图与热图----
+
+## 01差异分析-limma分析（得到6列差异基因表达矩阵）
+deg=DEG_limma(Group,probeM)
+
+## 02第7列：加上下调基因列（为绘制火山图与差异基因热图做准备）
+logFC_t=1;P.Value_t = 0.05  #设置显著差异过滤条件
+k1 = (deg$P.Value < P.Value_t)&(deg$logFC < -logFC_t)
+k2 = (deg$P.Value < P.Value_t)&(deg$logFC > logFC_t)
+deg <- mutate(deg,change = ifelse(k1,"down",ifelse(k2,"up","stable")))
+
+## 03第8列：加ENTREZID列及其余列,为富集分析
+s2e <- bitr(deg$symbol, 
+            fromType = "SYMBOL",
+            toType = "ENTREZID",
+            OrgDb = org.Hs.eg.db)#人类
+#其他物种http://bioconductor.org/packages/release/BiocViews.html#___OrgDb
+deg <- inner_join(deg,s2e,by=c("symbol"="SYMBOL"))
+
+## 04去重ENTREZEID对应多个基因的现象
+deg=deg[order(deg$symbol,abs(deg$logFC),decreasing = T),] #先按绝对值排
+deg = deg[!duplicated(deg$symbol),]
+table(deg)
+## 05差异基因好了，绘制火山图 p5
+p5=draw_p5_volcano(Group,deg,gse_number)
+
+## 06前十与后十个差异基因绘制热图 p6
+
+### 001挑选前十与后十变化最为显著的差异基因
+dat1=filter(deg,change!="stable") #去组别间不发生显著变化的基因
+dat2=arrange(dat1,logFC)#排序
+cg = c(head(dat2$symbol,10),tail(dat2$symbol,10)) #取前十与后十
+n=geneM[cg,]  ##差异表达矩阵里取前十与后十
+dim(n)
+
+## 002 20个差异表达矩阵好了，绘制热图
+p6 <- draw_p6_geneheatmap(Group,n)
+p6
+
+## 07拼图与保存图片
+plot_grid(p5, as.ggplot(p6))
+ggsave("png/p56.pdf",width=15, height=15)
+
+```
+
+#### 5利用GO与KEGG富集分析差异功能与差异通路
+
+```{r}
+
+# GO富集分析----
+
+## 01先对差异基因进行富集，包括上调、下调与整体差异基因
+ego=GO_enrich(deg) 
+
+## 02对富集后的结果可视化
+p7=draw_p7_GObarplot(ego)
+
+# KEGG富集分析---
+
+## 01先对上下调差异基因进行KEGG富集
+load(paste0(gse_number,"_GO.Rdata")) #输入已有的上下调参数
+KEGG_enrich(deg)
+
+## 02按照q值分别挑选10条上调与下调最显著的KEGG通路
+load(paste0(gse_number,"_KEGG.Rdata"))
+top10updownKEGG(kk.down,kk.up)
+
+## 03绘制top10down与top10up的KEGG条形图
+load("top10updown.Rdata")
+p8 <- draw_p8_KEGGBarplot (up.data,down.data)
+
+## 04拼图（GO与KEGG结果拼图）
+plot_grid(p7,p8)
+ggsave("png/p78.pdf",width = 15,height=15)
+
+```
+
+#### 6 GSEA富集分析
+
+```{r}
+# KEGG的GSEA富集分析---
+
+## 01KEGG的GSEA富集
+KeggGSEA_enrich(deg)
+
+## 02挑选前6个上调与后6个下调通路
+load('Rdata/gsea_kk.Rdata')
+dat=top6downupGSEA(deg)
+
+## 03绘制KEGG的GSEA富集分析条形图
+p9 <- draw_p9_gsea(dat)
+
+```
+
+#### 7.KEGG的GSEA富集分析具体通路可视化（折线图）
+
+```{r}
+ 
+# 针对上面获得的12条通路进行具体GSEA可视化
+
+## 01先看下调的6个通路并绘折线图
+load("top6downup.Rdata")
+p10 <- gseaplot2(kk, geneSetID = rownames(down_k))
+p10
+ggsave("png/p10.png")
+
+## 02再看上调的6个通路并绘折线图
+p11=gseaplot2(kk, geneSetID = rownames(up_k))
+ggsave("png/p11.png")
+
+## 03拼图并保存
+plot_grid(p9,p10,p11)
+ggsave("png/p91011.pdf",width = 15,height=15)
+
+```
